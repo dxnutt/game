@@ -1,0 +1,658 @@
+<!doctype html>
+<html lang="th">
+<head>
+  <meta charset="utf-8" />
+  <title>⚡ Space Ball Shooter: Galactic Chaos ⚡</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <style>
+    :root{
+      --bg1:#020024; --bg2:#090979; --accent:#00f6ff;
+    }
+    html,body{height:100%;margin:0;background:radial-gradient(circle at 20% 10%, #00132b 0%, #000011 30%, #000 100%);font-family:Inter, "Orbitron", sans-serif;color:var(--accent);overflow:hidden;}
+    #wrapper{position:relative;width:100%;height:100vh;display:flex;align-items:center;justify-content:center}
+    canvas{background:transparent; border:2px solid rgba(0,246,255,.12); box-shadow:0 0 40px rgba(0,246,255,.06); display:block; max-width:100%; height:auto;}
+    .hud{position:absolute;top:14px;left:18px;font-size:18px;line-height:1.4;text-shadow:0 0 10px rgba(0,246,255,.15)}
+    .hud .big{font-size:20px}
+    .controls{position:absolute;bottom:18px;left:50%;transform:translateX(-50%);display:flex;gap:12px}
+    button{background:linear-gradient(90deg,#00e5ff,#0096ff);border:none;border-radius:10px;padding:10px 18px;font-size:16px;color:#002;cursor:pointer;box-shadow:0 6px 18px rgba(0,246,255,.08);transition:transform .12s}
+    button:hover{transform:translateY(-3px)}
+    #gameOver{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);background:linear-gradient(180deg,rgba(0,0,0,.55),rgba(0,0,0,.7));padding:28px;border-radius:12px;display:none;text-align:center;color:#ffdede;box-shadow:0 10px 50px rgba(0,0,0,.6)}
+    #gameOver h1{margin:0 0 8px;font-size:36px;color:#ff9b9b;text-shadow:0 0 30px #ff4b4b}
+    #powerList{position:absolute;right:18px;top:18px;font-size:14px;text-align:right}
+    .small{font-size:13px;color:#bff}
+    .meter{display:inline-block;padding:6px 10px;border-radius:999px;background:rgba(0,0,0,.35);margin-left:8px}
+    .mute{position:absolute;right:18px;bottom:18px}
+  </style>
+</head>
+<body>
+  <div id="wrapper">
+    <canvas id="game" width="1100" height="650"></canvas>
+
+    <div class="hud">
+      <div class="big" id="score">💎 Score: 0</div>
+      <div id="info" class="small">Combo: x1 • Time: <span id="time">180</span>s • Mode: NORMAL</div>
+    </div>
+
+    <div id="powerList" class="small"></div>
+
+    <div class="controls">
+      <button id="startBtn">🚀 START</button>
+      <button id="resetBtn">🔁 RESET</button>
+      <button id="pauseBtn">⏸️ PAUSE</button>
+    </div>
+
+    <div id="gameOver">
+      <h1>🌌 GAME OVER 🌌</h1>
+      <p id="finalTxt">คุณทำคะแนนได้: <strong id="finalScore">0</strong></p>
+      <div style="margin-top:12px">
+        <button id="restartBtn">PLAY AGAIN</button>
+      </div>
+    </div>
+
+    <div class="mute small">
+      <label><input id="mute" type="checkbox"> ปิดเสียง</label>
+    </div>
+  </div>
+
+  <!-- เสียง (ใช้ URL ที่อนุญาตให้ฝัง) -->
+  <audio id="bgm" loop src="https://assets.mixkit.co/music/preview/mixkit-hip-hop-03-738.mp3"></audio>
+  <audio id="shootS" src="https://assets.mixkit.co/sfx/preview/mixkit-space-laser-gun-shot-1682.mp3"></audio>
+  <audio id="hitS" src="https://assets.mixkit.co/sfx/preview/mixkit-arcade-mechanical-bling-2103.mp3"></audio>
+  <audio id="explodeS" src="https://assets.mixkit.co/sfx/preview/mixkit-explosion-small-1693.mp3"></audio>
+  <audio id="powerS" src="https://assets.mixkit.co/sfx/preview/mixkit-fast-small-bonus-2570.mp3"></audio>
+  <audio id="bossS" src="https://assets.mixkit.co/sfx/preview/mixkit-epic-trailer-sweep-2387.mp3"></audio>
+
+  <script>
+  // =======================
+  // Space Ball Shooter: Galactic Chaos (Single-file)
+  // ฟีเจอร์หลัก:
+  // - Parallax stars 3 ชั้น
+  // - Power-ups (Triple, Bomb, Shield, Speed)
+  // - Boss มาพร้อม HP และการยิง
+  // - Combo multiplier, Overdrive
+  // - Screen shake, particle explosion
+  // - Pause / Mute
+  // =======================
+
+  const canvas = document.getElementById('game');
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width, H = canvas.height;
+
+  // HUD
+  const scoreEl = document.getElementById('score');
+  const timeEl = document.getElementById('time');
+  const infoEl = document.getElementById('info');
+  const powerList = document.getElementById('powerList');
+  const gameOverEl = document.getElementById('gameOver');
+  const finalScore = document.getElementById('finalScore');
+
+  const startBtn = document.getElementById('startBtn');
+  const resetBtn = document.getElementById('resetBtn');
+  const restartBtn = document.getElementById('restartBtn');
+  const pauseBtn = document.getElementById('pauseBtn');
+  const muteCheckbox = document.getElementById('mute');
+
+  const bgm = document.getElementById('bgm');
+  const shootS = document.getElementById('shootS');
+  const hitS = document.getElementById('hitS');
+  const explodeS = document.getElementById('explodeS');
+  const powerS = document.getElementById('powerS');
+  const bossS = document.getElementById('bossS');
+
+  // Game constants
+  const BASE_TIME = 180;
+  const SHOOTER_SPEED = 420;
+  const BULLET_SPEED = 700;
+  const BALL_R = 28;
+  const BALL_MIN_S = 90, BALL_MAX_S = 180;
+  const POWERUP_SIZE = 18;
+  const BOSS_INTERVAL = 45; // วินาทีระหว่างบอส (ปรับได้)
+  const MAX_ENEMIES = 8;
+
+  // State
+  let shooter = { x: W/2, y: H-70, w: 92, h: 14, color:'#fff', shield:false };
+  let bullets = [];
+  let balls = [];
+  let enemyBullets = [];
+  let particles = [];
+  let powerups = [];
+  let stars = [[],[],[]]; // parallax layers
+  let score = 0;
+  let timeLeft = BASE_TIME;
+  let combo = 0, comboTimer = 0;
+  let multiplier = 1;
+  let overdrive = false;
+  let running = false;
+  let paused = false;
+  let lastTime = null;
+  let keys = {left:false,right:false,space:false};
+  let canShoot = true, shootCooldown = 0.15; // rapid fire cooldown
+  let tripleShot = false, tripleTimer = 0;
+  let speedBoost = false, speedTimer = 0;
+  let shieldTimer = 0;
+  let bombCount = 0;
+  let boss = null;
+  let nextBossAt = BOSS_INTERVAL;
+  let screenShake = 0;
+  let gameOver = false;
+  let mute = false;
+
+  // Colors
+  const colors = ["#00f6ff","#ff6b6b","#ffd93d","#9bffea","#ff9bff","#aaf07f"];
+
+  // init stars
+  function initStars(){
+    stars[0] = Array.from({length:120}, ()=>({x:rand(0,W), y:rand(0,H), r:Math.random()*1.6, vy:rand(10,30)}));
+    stars[1] = Array.from({length:70}, ()=>({x:rand(0,W), y:rand(0,H), r:Math.random()*2.2, vy:rand(30,70)}));
+    stars[2] = Array.from({length:40}, ()=>({x:rand(0,W), y:rand(0,H), r:Math.random()*3, vy:rand(80,160)}));
+  }
+  initStars();
+
+  // helpers
+  function rand(a,b){return Math.random()*(b-a)+a;}
+  function clamp(v,a,b){return Math.max(a,Math.min(v,b));}
+  function dist(a,b){const dx=a.x-b.x, dy=a.y-b.y; return Math.sqrt(dx*dx+dy*dy);}
+
+  // spawn enemy ball
+  function spawnBall(aim=false, big=false){
+    const x = rand(BALL_R, W-BALL_R);
+    const y = rand(BALL_R, H/2 - 20);
+    const speed = rand(BALL_MIN_S, BALL_MAX_S) * (big?0.6:1);
+    let angle = rand(0, Math.PI*2);
+    // if aim, make it head toward player
+    let vx = Math.cos(angle)*speed, vy = Math.sin(angle)*speed;
+    if(aim){
+      const dx = shooter.x - x, dy = shooter.y - y;
+      const a = Math.atan2(dy,dx);
+      vx = Math.cos(a) * speed;
+      vy = Math.sin(a) * speed;
+    }
+    const color = colors[Math.floor(Math.random()*colors.length)];
+    const hp = big ? 3 : 1;
+    const size = big ? BALL_R*1.6 : BALL_R;
+    balls.push({x,y,vx,vy,color,angle:0,rotSpeed: rand(0.02,0.08),hp,size,aim});
+  }
+
+  // powerups spawn sometimes
+  function spawnPowerup(x,y){
+    const types = ['TRIPLE','BOMB','SPEED','SHIELD','POINTS'];
+    const type = types[Math.floor(Math.random()*types.length)];
+    powerups.push({x,y,vy:70,type,ttl:12});
+  }
+
+  // shoot
+  function shoot(){
+    if(!running || paused) return;
+    if(!canShoot) return;
+    canShoot=false;
+    setTimeout(()=>canShoot=true, shootCooldown*1000 * (speedBoost?0.6:1));
+    if(mute){} else { shootS.currentTime=0; shootS.play(); }
+    if(tripleShot){
+      bullets.push({x:shooter.x, y:shooter.y-12, vx:0, vy:-BULLET_SPEED});
+      bullets.push({x:shooter.x-18, y:shooter.y-8, vx:-120, vy:-BULLET_SPEED});
+      bullets.push({x:shooter.x+18, y:shooter.y-8, vx:120, vy:-BULLET_SPEED});
+    } else {
+      bullets.push({x:shooter.x, y:shooter.y-10, vx:0, vy:-BULLET_SPEED});
+    }
+  }
+
+  // bomb (clear small enemies)
+  function useBomb(){
+    if(bombCount<=0) return;
+    bombCount--;
+    if(!mute) { explodeS.currentTime=0; explodeS.play(); }
+    // large explosion particles and clear many enemies
+    explode(W/2, H/2, '#ffcf66', 80);
+    balls = balls.filter(b=>{
+      if(b.hp>1){ b.hp--; return true; } // big ones take hit
+      return false;
+    });
+    // screen shake
+    screenShake = 18;
+  }
+
+  // boss spawn
+  function spawnBoss(){
+    boss = {x: W/2, y: 120, w:160, h:100, hp: 20, maxHp:20, phase:0, timer:0};
+    if(!mute) { bossS.currentTime=0; bossS.play(); }
+  }
+
+  // particles: explosion
+  function explode(x,y,color,count=30){
+    for(let i=0;i<count;i++){
+      particles.push({
+        x,y,
+        vx:rand(-400,400),
+        vy:rand(-400,400),
+        life:rand(0.5,1.3),
+        color
+      });
+    }
+  }
+
+  // screen shake helper
+  function applyShake(){
+    if(screenShake>0){
+      screenShake *= 0.9;
+      if(Math.abs(screenShake) < 0.3) screenShake = 0;
+      return Math.random()*screenShake - screenShake/2;
+    }
+    return 0;
+  }
+
+  // update loop
+  function update(dt){
+    if(!running || paused) return;
+
+    // timers
+    if(tripleShot){ tripleTimer -= dt; if(tripleTimer<=0){ tripleShot=false; } }
+    if(speedBoost){ speedTimer -= dt; if(speedTimer<=0){ speedBoost=false; } }
+    if(shooter.shield){ shieldTimer -= dt; if(shieldTimer<=0){ shooter.shield=false; } }
+
+    // stars parallax
+    stars.forEach((layer, idx) => {
+      layer.forEach(s => { s.y += s.vy * dt * (idx+0.3); if(s.y>H) { s.y=0; s.x=rand(0,W); } });
+    });
+
+    // shooter movement
+    if(keys.left) shooter.x -= (SHOOTER_SPEED * (speedBoost?1.6:1)) * dt;
+    if(keys.right) shooter.x += (SHOOTER_SPEED * (speedBoost?1.6:1)) * dt;
+    shooter.x = clamp(shooter.x, shooter.w/2, W - shooter.w/2);
+
+    // bullets update
+    bullets.forEach(b => { b.x += b.vx*dt; b.y += b.vy*dt; });
+    bullets = bullets.filter(b => b.y > -30 && b.x > -50 && b.x < W+50);
+
+    // enemy bullets
+    enemyBullets.forEach(b => { b.x += b.vx*dt; b.y += b.vy*dt; });
+    enemyBullets = enemyBullets.filter(b => b.y < H+50 && b.x > -50 && b.x < W+50);
+
+    // balls update
+    balls.forEach(ball => {
+      ball.x += ball.vx*dt;
+      ball.y += ball.vy*dt;
+      ball.angle += ball.rotSpeed;
+      // bounce edges
+      if(ball.x < ball.size || ball.x > W - ball.size) ball.vx *= -1;
+      if(ball.y < ball.size || ball.y > H - 170) ball.vy *= -1;
+
+      // occasional aim adjustment if they are "aim" type
+      if(ball.aim && Math.random()<0.01){
+        const dx = (shooter.x - ball.x), dy = (shooter.y - ball.y);
+        const a = Math.atan2(dy,dx);
+        const s = Math.sqrt(ball.vx*ball.vx + ball.vy*ball.vy);
+        ball.vx = Math.cos(a) * s;
+        ball.vy = Math.sin(a) * s;
+      }
+
+      // collision with shooter (enemy hits player)
+      const dx = ball.x - shooter.x, dy = ball.y - shooter.y;
+      if(dx*dx + dy*dy < (ball.size + shooter.h + 6)**2){
+        // if shield active, destroy ball else penalty
+        if(shooter.shield){
+          if(!mute) hitS.currentTime=0, hitS.play();
+          explode(ball.x, ball.y, ball.color, 20);
+          // remove ball
+          ball.x = -999;
+          score += 10 * multiplier;
+        } else {
+          // end game immediately
+          running = false; gameOver = true; showGameOver();
+        }
+      }
+    });
+    balls = balls.filter(b => b.x > -200);
+
+    // bullets vs balls
+    bullets.forEach(b => {
+      balls.forEach(ball => {
+        const dx = b.x - ball.x, dy = b.y - ball.y;
+        if(dx*dx + dy*dy < (ball.size + 6)**2){
+          // hit
+          b.y = -9999;
+          ball.hp--;
+          if(!mute) hitS.currentTime=0, hitS.play();
+          explode(ball.x, ball.y, ball.color, 8);
+          // scoring
+          combo += 1;
+          comboTimer = 2.2; // seconds to keep combo
+          multiplier = 1 + Math.floor(combo / 8) * 0.5; // every 8 hits increases
+          score += Math.round( (overdrive?30:10) * multiplier );
+          // chance to spawn powerup on kill
+          if(ball.hp <= 0){
+            if(Math.random() < 0.18) spawnPowerup(ball.x, ball.y);
+            ball.x = -9999;
+            // small chance to drop bomb
+            if(Math.random() < 0.06){ bombCount++; }
+          }
+        }
+      });
+    });
+    bullets = bullets.filter(b => b.y > -100);
+
+    // particles update
+    particles.forEach(p => { p.x += p.vx * dt; p.y += p.vy * dt; p.life -= dt; });
+    particles = particles.filter(p => p.life > 0);
+
+    // powerups
+    powerups.forEach(p => {
+      p.y += p.vy * dt;
+      p.ttl -= dt;
+      // pickup?
+      const dx = p.x - shooter.x, dy = p.y - shooter.y;
+      if(dx*dx + dy*dy < (POWERUP_SIZE + shooter.h)**2){
+        applyPowerup(p.type);
+        p.ttl = -1;
+      }
+    });
+    powerups = powerups.filter(p => p.ttl > 0 && p.y < H + 40);
+
+    // enemy bullets vs shooter
+    enemyBullets.forEach(b => {
+      const dx = b.x - shooter.x, dy = b.y - shooter.y;
+      if(dx*dx + dy*dy < (8 + shooter.h)**2){
+        b.x = -9999;
+        if(shooter.shield){
+          // shield blocks
+        } else {
+          running = false; gameOver = true; showGameOver();
+        }
+      }
+    });
+
+    // boss behaviour
+    if(boss){
+      boss.timer += dt;
+      // boss moves slowly left-right
+      boss.x += Math.sin(boss.timer*0.6) * 40 * dt;
+      // boss shooting pattern
+      if(boss.timer > 0.7){
+        boss.timer = 0;
+        // shoots several bullets towards player
+        for(let i=0;i<3;i++){
+          const a = Math.atan2(shooter.y - boss.y, (shooter.x - (boss.x - boss.w/3 + i*(boss.w/3))));
+          const speed = 260 + Math.random()*120;
+          enemyBullets.push({x: boss.x - boss.w/3 + i*(boss.w/3), y: boss.y + 30, vx: Math.cos(a)*speed, vy: Math.sin(a)*speed});
+        }
+      }
+      // boss hitbox check (bullets)
+      bullets.forEach(b=>{
+        if(b.x > boss.x - boss.w/2 && b.x < boss.x + boss.w/2 && b.y > boss.y - boss.h/2 && b.y < boss.y + boss.h/2){
+          b.y = -9999;
+          boss.hp--;
+          explode(b.x,b.y,'#ffef66',6);
+          score += 50 * multiplier;
+          if(boss.hp <= 0){
+            // boss destroyed
+            explode(boss.x, boss.y, '#ff6b6b', 80);
+            score += 500;
+            boss = null;
+            nextBossAt += BOSS_INTERVAL + 18; // next boss later
+            screenShake = 26;
+          }
+        }
+      });
+    }
+
+    // spawn logic: keep enemies up to max
+    if(balls.length < MAX_ENEMIES && Math.random() < 0.02){
+      // sometimes spawn big or aim type
+      spawnBall(Math.random() < 0.25, Math.random() < 0.15);
+    }
+
+    // occasionally spawn powerups
+    if(Math.random() < 0.008) spawnPowerup(rand(80,W-80), rand(40,H/2));
+
+    // combo timer
+    if(comboTimer > 0){ comboTimer -= dt; }
+    if(comboTimer <= 0){ combo = 0; multiplier = 1; comboTimer = 0; }
+
+    // time left
+    timeLeft -= dt;
+    if(timeLeft <= 0){ running=false; gameOver=true; showGameOver(); }
+
+    // next boss handling
+    if(!boss && timeLeft < BASE_TIME - nextBossAt && !gameOver){
+      spawnBoss();
+    }
+  }
+
+  // apply powerup
+  function applyPowerup(type){
+    if(!mute) powerS.currentTime=0, powerS.play();
+    if(type==='TRIPLE'){ tripleShot=true; tripleTimer=10; }
+    if(type==='BOMB'){ bombCount++; }
+    if(type==='SPEED'){ speedBoost=true; speedTimer=10; }
+    if(type==='SHIELD'){ shooter.shield=true; shieldTimer=10; }
+    if(type==='POINTS'){ score += 200; }
+  }
+
+  // draw loop
+  function draw(){
+    // screen shake
+    const sx = applyShake();
+    const sy = applyShake();
+
+    ctx.save();
+    ctx.clearRect(0,0,W,H);
+    ctx.translate(sx, sy);
+
+    // background gradient
+    const g = ctx.createLinearGradient(0,0,0,H);
+    g.addColorStop(0,'#000010'); g.addColorStop(1,'#001226');
+    ctx.fillStyle = g;
+    ctx.fillRect(0,0,W,H);
+
+    // parallax stars
+    stars.forEach((layer,idx)=>{
+      ctx.globalAlpha = 0.55 - idx*0.12;
+      layer.forEach(s=>{
+        ctx.beginPath();
+        ctx.arc(s.x, s.y, s.r*(1+idx*0.6), 0, Math.PI*2);
+        ctx.fillStyle = idx===2 ? '#ffd' : '#0ff';
+        ctx.fill();
+      });
+    });
+    ctx.globalAlpha = 1;
+
+    // balls (enemies)
+    balls.forEach(b=>{
+      ctx.save();
+      ctx.translate(b.x,b.y);
+      ctx.rotate(b.angle);
+      // glow
+      ctx.shadowBlur = 18; ctx.shadowColor = b.color;
+      const radGrad = ctx.createRadialGradient(0,0,4,0,0,b.size);
+      radGrad.addColorStop(0,'#fff'); radGrad.addColorStop(0.15,'#fff'); radGrad.addColorStop(1,b.color);
+      ctx.fillStyle = radGrad;
+      ctx.beginPath(); ctx.arc(0,0,b.size,0,Math.PI*2); ctx.fill();
+      ctx.shadowBlur = 0;
+      ctx.restore();
+    });
+
+    // boss
+    if(boss){
+      // draw boss body with health
+      ctx.save();
+      ctx.translate(boss.x,boss.y);
+      // body
+      ctx.fillStyle = '#ff6b6b';
+      ctx.shadowBlur = 30; ctx.shadowColor = '#ff6b6b';
+      ctx.beginPath();
+      ctx.ellipse(0,0,boss.w/2,boss.h/2,0,0,Math.PI*2);
+      ctx.fill();
+      ctx.shadowBlur=0;
+      // eyes/guns
+      ctx.fillStyle='#111';
+      ctx.fillRect(-boss.w/4, -boss.h/6, boss.w/6, boss.h/8);
+      ctx.fillRect(boss.w/12, -boss.h/6, boss.w/6, boss.h/8);
+      // HP bar
+      ctx.fillStyle='rgba(0,0,0,0.4)';
+      ctx.fillRect(-boss.w/2, boss.h/2 + 6, boss.w, 10);
+      ctx.fillStyle='#ffd93d';
+      const hpW = (boss.hp / boss.maxHp) * boss.w;
+      ctx.fillRect(-boss.w/2, boss.h/2 + 6, hpW, 10);
+      ctx.restore();
+    }
+
+    // shooter
+    ctx.save();
+    ctx.fillStyle = shooter.shield ? '#9bffea' : '#fff';
+    ctx.shadowBlur = shooter.shield ? 30 : 12;
+    ctx.shadowColor = shooter.shield ? '#9bffea' : '#0ff';
+    ctx.fillRect(shooter.x - shooter.w/2, shooter.y, shooter.w, shooter.h);
+    // shooter thruster glow
+    ctx.shadowBlur = 0;
+    ctx.restore();
+
+    // bullets
+    bullets.forEach(b=>{
+      ctx.beginPath();
+      ctx.fillStyle = '#00f6ff';
+      ctx.arc(b.x,b.y,6,0,Math.PI*2);
+      ctx.fill();
+    });
+
+    // enemy bullets
+    enemyBullets.forEach(b=>{
+      ctx.beginPath();
+      ctx.fillStyle = '#ff9b9b';
+      ctx.arc(b.x,b.y,7,0,Math.PI*2);
+      ctx.fill();
+    });
+
+    // particles
+    particles.forEach(p=>{
+      ctx.globalAlpha = Math.max(p.life,0);
+      ctx.fillStyle = p.color;
+      ctx.fillRect(p.x-2,p.y-2,4,4);
+    });
+    ctx.globalAlpha = 1;
+
+    // powerups
+    powerups.forEach(p=>{
+      ctx.save();
+      ctx.translate(p.x,p.y);
+      ctx.beginPath();
+      const col = p.type === 'TRIPLE' ? '#9bffea' : p.type==='BOMB' ? '#ffd93d' : p.type==='SPEED' ? '#aaf07f' : p.type==='SHIELD' ? '#9bbcff' : '#ff9bff';
+      ctx.fillStyle = col;
+      ctx.shadowBlur = 18; ctx.shadowColor = col;
+      ctx.arc(0,0,POWERUP_SIZE,0,Math.PI*2); ctx.fill();
+      ctx.shadowBlur = 0;
+      ctx.fillStyle = '#002';
+      ctx.font = '12px Inter, Arial';
+      ctx.textAlign = 'center'; ctx.textBaseline='middle';
+      ctx.fillText(p.type[0],0,0);
+      ctx.restore();
+    });
+
+    ctx.restore(); // after shake translate
+
+    // UI updates
+    scoreEl.textContent = `💎 Score: ${score}`;
+    timeEl.textContent = Math.ceil(timeLeft);
+    const modeTxt = overdrive ? '⚡ OVERDRIVE' : 'NORMAL';
+    infoEl.textContent = `Combo: x${multiplier} • Time: ${Math.ceil(timeLeft)}s • Mode: ${modeTxt} • Bombs: ${bombCount}`;
+    // power list
+    let list = [];
+    if(tripleShot) list.push('TRIPLE');
+    if(speedBoost) list.push('SPEED');
+    if(shooter.shield) list.push('SHIELD');
+    if(bombCount>0) list.push('BOMB x'+bombCount);
+    powerList.innerHTML = list.length ? 'Power: <span class="meter">' + list.join(' • ') + '</span>' : '';
+
+    // debug draws (optional)
+  }
+
+  // main loop
+  function loop(ts){
+    if(!lastTime) lastTime = ts;
+    const dt = Math.min((ts - lastTime)/1000, 0.06);
+    lastTime = ts;
+    if(running && !paused) update(dt);
+    draw();
+    requestAnimationFrame(loop);
+  }
+  requestAnimationFrame(loop);
+
+  // input handlers
+  document.addEventListener('keydown', e=>{
+    if(e.key === 'ArrowLeft') keys.left = true;
+    if(e.key === 'ArrowRight') keys.right = true;
+    if(e.code === 'Space') { keys.space = true; shoot(); }
+    if(e.key === 'b' || e.key === 'B') { useBomb(); }
+    if(e.key === 'p' || e.key === 'P') togglePause();
+  });
+  document.addEventListener('keyup', e=>{
+    if(e.key === 'ArrowLeft') keys.left = false;
+    if(e.key === 'ArrowRight') keys.right = false;
+    if(e.code === 'Space') keys.space = false;
+  });
+
+  // controls
+  startBtn.onclick = () => startGame();
+  resetBtn.onclick = () => resetGame();
+  restartBtn.onclick = () => startGame();
+  pauseBtn.onclick = () => togglePause();
+  muteCheckbox.onchange = (e) => { mute = e.target.checked; if(mute) { bgm.pause(); } else { if(running && !paused) bgm.play(); } };
+
+  // start/reset/gameover
+  function startGame(){
+    // reset state
+    bullets = []; balls = []; particles = []; powerups = []; enemyBullets = [];
+    score = 0; timeLeft = BASE_TIME; combo = 0; multiplier = 1;
+    tripleShot = false; speedBoost = false; shooter.shield = false; bombCount = 0;
+    boss = null; nextBossAt = BOSS_INTERVAL; screenShake = 0; gameOver = false;
+    running = true; paused = false;
+    shooter.x = W/2;
+    // spawn some initial enemies
+    for(let i=0;i<6;i++) spawnBall(Math.random()<0.2, Math.random()<0.12);
+    gameOverEl.style.display = 'none';
+    lastTime = null;
+    if(!mute){ bgm.currentTime = 0; bgm.play(); }
+  }
+
+  function resetGame(){
+    running = false; paused=false; gameOver=false;
+    bullets=[]; balls=[]; particles=[]; powerups=[];
+    score = 0; timeLeft = BASE_TIME; shooter.x = W/2;
+    gameOverEl.style.display = 'none';
+    if(!mute) bgm.pause();
+  }
+
+  function showGameOver(){
+    finalScore.textContent = score;
+    gameOverEl.style.display = 'block';
+    if(!mute) bgm.pause();
+  }
+
+  function togglePause(){
+    if(!running) return;
+    paused = !paused;
+    pauseBtn.textContent = paused ? '▶️ RESUME' : '⏸️ PAUSE';
+    if(mute){} else { if(paused) bgm.pause(); else bgm.play(); }
+  }
+
+  // small UI: click canvas to shoot (for mobile)
+  canvas.addEventListener('pointerdown', (e)=>{
+    shoot();
+  });
+
+  // on-screen resize (keep canvas ratio)
+  window.addEventListener('resize', ()=>{
+    // keep canvas CSS responsive but internal size fixed for behavior predictability
+    // could be extended to dynamically scale canvas
+  });
+
+  // small helper to gradually increase difficulty
+  setInterval(()=>{
+    // every 15s slightly increase max enemies and speed
+    if(BALL_MAX_S < 540) {
+      // no direct change to constants here to keep gameplay stable, but we can spawn more often by increasing MAX_ENEMIES dynamically if desired
+    }
+  },15000);
+
+  // End of script
+  </script>
+</body>
+</html>
