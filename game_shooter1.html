@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="th">
+<head>
+  <meta charset="utf-8">
+  <title>เกมยิงลูกบอล (เวอร์ชันคีย์บอร์ด)</title>
+  <style>
+    html,body{margin:0;height:100%;background:#000;color:#fff;font-family:sans-serif;overflow:hidden}
+    canvas{background:#000;display:block;margin:auto;border:1px solid #333}
+    .hud{position:absolute;top:10px;right:20px;text-align:right;font-size:18px}
+    .controls{position:absolute;bottom:10px;right:20px}
+    button{margin-left:8px;padding:6px 12px;border:none;border-radius:4px;background:#333;color:#fff;cursor:pointer}
+    button:hover{background:#555}
+    #gameOver{
+      position:absolute;top:50%;left:50%;
+      transform:translate(-50%,-50%);
+      text-align:center;font-size:36px;color:#ff4444;display:none;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="game" width="800" height="600"></canvas>
+  <div class="hud">
+    <div id="time">Time: 180</div>
+    <div id="score">Score: 0</div>
+  </div>
+  <div class="controls">
+    <button id="startBtn">Start</button>
+    <button id="resetBtn">Reset</button>
+  </div>
+
+  <div id="gameOver">
+    <div>⏰ Time’s up!</div>
+    <div>Game Over</div>
+    <button id="restartBtn">Restart</button>
+  </div>
+
+  <script>
+  const WIDTH=800,HEIGHT=600;
+  const BULLET_SPEED=400,BULLET_RADIUS=5;
+  const BALL_RADIUS=25,BALL_SPEED_MIN=80,BALL_SPEED_MAX=160; // px/s
+  const GOAL_W=100,GOAL_H=10,GAME_TIME=180;
+  const SHOOTER_SPEED=300; // px/s
+
+  const canvas=document.getElementById("game");
+  const ctx=canvas.getContext("2d");
+  const timeEl=document.getElementById("time"),scoreEl=document.getElementById("score");
+  const startBtn=document.getElementById("startBtn"),resetBtn=document.getElementById("resetBtn");
+  const gameOverEl=document.getElementById("gameOver"),restartBtn=document.getElementById("restartBtn");
+
+  let shooter={x:WIDTH/2,y:HEIGHT-50,w:60,h:10};
+  let bullets=[],balls=[],goal={x:(WIDTH-GOAL_W)/2,y:0,w:GOAL_W,h:GOAL_H};
+  let score=0,timeLeft=GAME_TIME,running=false,gameOver=false,last=null;
+  let keys={left:false,right:false,space:false};
+
+  function rand(a,b){return Math.random()*(b-a)+a}
+  function clamp(v,a,b){return Math.max(a,Math.min(b,v))}
+  function spawnBall(){
+    const angle=rand(0,Math.PI*2);
+    const speed=rand(BALL_SPEED_MIN,BALL_SPEED_MAX);
+    const x=rand(BALL_RADIUS,WIDTH-BALL_RADIUS);
+    const y=rand(BALL_RADIUS,HEIGHT-150);
+    balls.push({x,y,vx:Math.cos(angle)*speed,vy:Math.sin(angle)*speed});
+  }
+  function shoot(){
+    bullets.push({x:shooter.x,y:shooter.y-10,vx:0,vy:-BULLET_SPEED});
+  }
+
+  // ---- Keyboard control ----
+  document.addEventListener("keydown",e=>{
+    if(e.code==="ArrowLeft") keys.left=true;
+    if(e.code==="ArrowRight") keys.right=true;
+    if(e.code==="Space") keys.space=true;
+  });
+  document.addEventListener("keyup",e=>{
+    if(e.code==="ArrowLeft") keys.left=false;
+    if(e.code==="ArrowRight") keys.right=false;
+    if(e.code==="Space"){shoot();keys.space=false;}
+  });
+
+  // ---- Buttons ----
+  startBtn.onclick=()=>{startGame();};
+  resetBtn.onclick=()=>{startGame();};
+  restartBtn.onclick=()=>{startGame();};
+
+  function startGame(){
+    running=true;gameOver=false;
+    timeLeft=GAME_TIME;score=0;
+    bullets=[];balls=[];spawnBall();
+    gameOverEl.style.display="none";
+    shooter.x=WIDTH/2;
+  }
+
+  function update(dt){
+    // move shooter
+    if(keys.left) shooter.x-=SHOOTER_SPEED*dt;
+    if(keys.right) shooter.x+=SHOOTER_SPEED*dt;
+    shooter.x=clamp(shooter.x,shooter.w/2,WIDTH-shooter.w/2);
+
+    // move bullets
+    bullets.forEach(b=>{b.y+=b.vy*dt;});
+    bullets=bullets.filter(b=>b.y>-10);
+
+    // move balls
+    balls.forEach(ball=>{
+      ball.x+=ball.vx*dt;
+      ball.y+=ball.vy*dt;
+      if(ball.x<BALL_RADIUS||ball.x>WIDTH-BALL_RADIUS)ball.vx*=-1;
+      if(ball.y<BALL_RADIUS)ball.vy*=-1;
+      if(ball.y>HEIGHT-100)ball.vy*=-1;
+
+      bullets.forEach(b=>{
+        const dx=ball.x-b.x,dy=ball.y-b.y;
+        if(dx*dx+dy*dy<(BALL_RADIUS+BULLET_RADIUS)**2){
+          const angle=Math.atan2(dy,dx);
+          ball.vx=Math.cos(angle)*BALL_SPEED_MAX;
+          ball.vy=Math.sin(angle)*BALL_SPEED_MAX;
+          b.y=-999;
+        }
+      });
+
+      if(ball.y-BALL_RADIUS<goal.y+goal.h && ball.x>goal.x && ball.x<goal.x+goal.w){
+        score++; ball.x=-999; spawnBall();
+      }
+    });
+
+    bullets=bullets.filter(b=>b.y>0);
+    balls=balls.filter(b=>b.x>0);
+
+    timeLeft-=dt;
+    if(timeLeft<=0){
+      timeLeft=0; running=false; gameOver=true;
+      showGameOver();
+    }
+  }
+
+  function showGameOver(){
+    gameOverEl.style.display="block";
+  }
+
+  function draw(){
+    ctx.clearRect(0,0,WIDTH,HEIGHT);
+    ctx.fillStyle="#060";ctx.fillRect(goal.x,goal.y,goal.w,goal.h);
+    ctx.fillStyle="#fff";ctx.fillRect(shooter.x-shooter.w/2,shooter.y,shooter.w,shooter.h);
+    ctx.fillStyle="yellow";bullets.forEach(b=>{ctx.beginPath();ctx.arc(b.x,b.y,BULLET_RADIUS,0,2*Math.PI);ctx.fill();});
+    ctx.fillStyle="red";balls.forEach(ball=>{ctx.beginPath();ctx.arc(ball.x,ball.y,BALL_RADIUS,0,2*Math.PI);ctx.fill();});
+    timeEl.textContent=`Time: ${Math.ceil(timeLeft)}`;
+    scoreEl.textContent=`Score: ${score}`;
+  }
+
+  function loop(t){
+    if(!last) last=t;
+    const dt=(t-last)/1000; last=t;
+    if(running) update(dt);
+    draw();
+    requestAnimationFrame(loop);
+  }
+
+  spawnBall();
+  requestAnimationFrame(loop);
+  </script>
+</body>
+</html>
